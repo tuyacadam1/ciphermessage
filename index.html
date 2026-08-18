@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Sheets Cipher Board</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; max-width: 700px; margin: 40px auto; padding: 0 16px; }
+    h1 { text-align: center; color: #38bdf8; }
+    .card { background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #334155; }
+    textarea, input[type="text"] { width: 100%; padding: 10px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #fff; }
+    button { width: 100%; padding: 10px; background: #0284c7; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    button:hover { background: #0369a1; }
+    .post { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .post-header { font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px; }
+    .post-text { font-family: monospace; font-size: 1rem; background: #0f172a; padding: 12px; border-radius: 4px; word-break: break-all; color: #f43f5e; }
+    .post-text.unlocked { color: #4ade80; }
+    .decrypt-row { display: flex; gap: 8px; margin-top: 10px; }
+    .decrypt-row input { margin: 0; }
+    .decrypt-row button { width: auto; background: #16a34a; padding: 0 16px; }
+  </style>
+</head>
+<body>
+
+  <h1>Google Sheets Secret Board</h1>
+
+  <div class="card">
+    <label>Message</label>
+    <textarea id="messageInput" placeholder="Write something secret..."></textarea>
+    
+    <label>Secret Key</label>
+    <input type="text" id="keyInput" placeholder="Passphrase (e.g. CIPHER)">
+
+    <button onclick="submitPost()">Post Encrypted Message</button>
+  </div>
+
+  <h2>Public Feed</h2>
+  <div id="feed">Loading messages...</div>
+
+  <script>
+    // Paste your Google Apps Script Web App URL here
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx8cA9f8wz-xk4FoNWv4mnZ8AKUul9zpiBSZ3sYwyCgKvJnEGOWmgAPOH2e20Bnzes_/exec";
+
+    function vigenere(text, key, decrypt = false) {
+      let result = '';
+      key = key.toUpperCase().replace(/[^A-Z]/g, '');
+      if (!key) return text;
+
+      let keyIdx = 0;
+      for (let i = 0; i < text.length; i++) {
+        let char = text[i];
+        if (/[a-zA-Z]/.test(char)) {
+          let isUpper = char === char.toUpperCase();
+          let c = char.toUpperCase().charCodeAt(0) - 65;
+          let k = key[keyIdx % key.length].charCodeAt(0) - 65;
+          
+          let shift = decrypt ? (26 - k) % 26 : k;
+          let newChar = String.fromCharCode(((c + shift) % 26) + 65);
+          
+          result += isUpper ? newChar : newChar.toLowerCase();
+          keyIdx++;
+        } else {
+          result += char;
+        }
+      }
+      return result;
+    }
+
+    async function submitPost() {
+      const msg = document.getElementById('messageInput').value.trim();
+      const key = document.getElementById('keyInput').value.trim();
+
+      if (!msg || !key) return alert('Enter both a message and a secret key.');
+
+      const cipherText = vigenere(msg, key, false);
+
+      // Post ciphertext to Google Apps Script API
+      await fetch(SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ cipherText })
+      });
+
+      document.getElementById('messageInput').value = '';
+      document.getElementById('keyInput').value = '';
+      loadPosts();
+    }
+
+    async function loadPosts() {
+      const res = await fetch(SCRIPT_URL);
+      const posts = await res.json();
+      const feed = document.getElementById('feed');
+
+      if (posts.length === 0) {
+        feed.innerHTML = '<p style="color:#94a3b8">No messages yet.</p>';
+        return;
+      }
+
+      feed.innerHTML = posts.map(p => `
+        <div class="post">
+          <div class="post-header">Posted at ${p.timestamp}</div>
+          <div class="post-text" id="text-${p.id}">${p.cipherText}</div>
+          <div class="decrypt-row">
+            <input type="text" placeholder="Enter key to unlock" id="key-${p.id}">
+            <button onclick="tryDecrypt('${p.id}', '${p.cipherText}')">Decrypt</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function tryDecrypt(id, cipherText) {
+      const keyInput = document.getElementById(`key-${id}`);
+      const textElem = document.getElementById(`text-${id}`);
+      const key = keyInput.value.trim();
+
+      if (!key) return alert('Enter a key to unlock.');
+
+      const decrypted = vigenere(cipherText, key, true);
+      textElem.textContent = decrypted;
+      textElem.classList.add('unlocked');
+    }
+
+    loadPosts();
+  </script>
+</body>
+</html>
