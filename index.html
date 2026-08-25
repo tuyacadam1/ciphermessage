@@ -21,7 +21,7 @@
       gap: 16px;
     }
 
-    /* Responsive fallback for smaller screens */
+    /* Responsive fallbacks for smaller screen viewports */
     @media (max-width: 1200px) { #feed { grid-template-columns: repeat(3, 1fr); } }
     @media (max-width: 768px) { #feed { grid-template-columns: repeat(1, 1fr); } }
 
@@ -69,6 +69,7 @@
   <div id="feed">Loading messages...</div>
 
   <script>
+    // Paste your Web App Deployment URL here
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx8cA9f8wz-xk4FoNWv4mnZ8AKUul9zpiBSZ3sYwyCgKvJnEGOWmgAPOH2e20Bnzes_/exec";
 
     // --- AES-GCM Web Crypto Helper Functions ---
@@ -114,7 +115,7 @@
       }
     }
 
-    // --- App Operations ---
+    // --- Application Operations ---
     async function submitPost() {
       const msg = document.getElementById('messageInput').value.trim();
       const passphrase = document.getElementById('passphraseInput').value.trim();
@@ -194,10 +195,12 @@
 
       if (!passphrase) return alert('Enter a passphrase to decrypt.');
 
+      // Step 1: Attempt local AES decryption
       const decryptedText = await decryptAES(cipherText, passphrase);
 
       if (decryptedText !== null) {
-        await fetch(SCRIPT_URL, {
+        // Step 2: Key was correct! Send result to Google Sheets
+        const res = await fetch(SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
@@ -208,7 +211,17 @@
           })
         });
 
-        alert('Decryption successful!');
+        const responseData = await res.json();
+
+        // Step 3: Handle server validation result
+        if (responseData.status === "already_solved") {
+          alert(`Your passphrase was correct, but ${responseData.solvedBy} solved this card right before you!`);
+        } else if (responseData.status === "success") {
+          alert('Congratulations! You were the first to decrypt this message.');
+        } else {
+          alert('An error occurred. Please try again.');
+        }
+
         loadPosts();
       } else {
         alert('Incorrect passphrase. Access denied.');
