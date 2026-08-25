@@ -6,21 +6,43 @@
   <title>AES Google Sheets Cipher Board</title>
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: #0f172a; color: #f8fafc; max-width: 700px; margin: 40px auto; padding: 0 16px; }
+    body { background: #0f172a; color: #f8fafc; max-width: 1400px; margin: 40px auto; padding: 0 16px; }
     h1 { text-align: center; color: #38bdf8; }
-    .card { background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 24px; border: 1px solid #334155; }
+    
+    .card { background: #1e293b; padding: 20px; border-radius: 8px; margin: 0 auto 32px; border: 1px solid #334155; max-width: 600px; }
     textarea, input[type="text"] { width: 100%; padding: 10px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #fff; }
     button { width: 100%; padding: 10px; background: #0284c7; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
     button:hover { background: #0369a1; }
-    .post { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-    .post-header { font-size: 0.8rem; color: #94a3b8; margin-bottom: 8px; display: flex; justify-content: space-between; }
-    .post-text { font-family: monospace; font-size: 0.85rem; background: #0f172a; padding: 12px; border-radius: 4px; word-break: break-all; color: #f43f5e; margin-bottom: 8px; }
-    .post-text.unlocked { color: #4ade80; font-family: system-ui, sans-serif; font-size: 1rem; font-weight: 600; }
-    .post-hint { font-size: 0.85rem; color: #cbd5e1; margin-bottom: 12px; font-style: italic; }
-    .decrypt-row { display: flex; gap: 8px; margin-top: 10px; }
-    .decrypt-row input { margin: 0; }
-    .decrypt-row button { width: auto; background: #16a34a; padding: 0 16px; white-space: nowrap; }
-    .solved-badge { background: #166534; color: #4ade80; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
+    
+    /* --- 5-Column Grid Layout for Public Feed --- */
+    #feed {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 16px;
+    }
+
+    /* Responsive fallback for smaller screens */
+    @media (max-width: 1200px) { #feed { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 768px) { #feed { grid-template-columns: repeat(1, 1fr); } }
+
+    .post { 
+      background: #1e293b; 
+      border: 1px solid #334155; 
+      border-radius: 8px; 
+      padding: 14px; 
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .post-header { font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px; }
+    .post-text { font-family: monospace; font-size: 0.8rem; background: #0f172a; padding: 10px; border-radius: 4px; word-break: break-all; color: #f43f5e; margin-bottom: 8px; }
+    .post-text.unlocked { color: #4ade80; font-family: system-ui, sans-serif; font-size: 0.95rem; font-weight: 600; }
+    .post-hint { font-size: 0.8rem; color: #cbd5e1; margin-bottom: 12px; font-style: italic; }
+    
+    .decrypt-row { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+    .decrypt-row input { margin: 0; font-size: 0.85rem; padding: 8px; }
+    .decrypt-row button { width: 100%; background: #16a34a; padding: 8px; font-size: 0.85rem; }
+    .solved-badge { background: #166534; color: #4ade80; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; width: fit-content; }
   </style>
 </head>
 <body>
@@ -47,7 +69,6 @@
   <div id="feed">Loading messages...</div>
 
   <script>
-    // Replace with your Google Apps Script Web App Deployment URL
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx8cA9f8wz-xk4FoNWv4mnZ8AKUul9zpiBSZ3sYwyCgKvJnEGOWmgAPOH2e20Bnzes_/exec";
 
     // --- AES-GCM Web Crypto Helper Functions ---
@@ -89,7 +110,7 @@
         const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
         return new TextDecoder().decode(decrypted);
       } catch (e) {
-        return null; // Triggers if password is incorrect
+        return null;
       }
     }
 
@@ -127,7 +148,7 @@
         const feed = document.getElementById('feed');
 
         if (posts.length === 0) {
-          feed.innerHTML = '<p style="color:#94a3b8">No messages yet.</p>';
+          feed.innerHTML = '<p style="color:#94a3b8; grid-column: span 5;">No messages yet.</p>';
           return;
         }
 
@@ -135,21 +156,24 @@
           const isSolved = Boolean(p.plaintext);
           return `
             <div class="post">
-              <div class="post-header">
-                <span>By: ${p.encryptedBy || 'Anonymous'} • ${p.timestamp}</span>
-                ${isSolved ? `<span class="solved-badge">Unlocked by ${p.decryptedBy || 'Unknown'}</span>` : ''}
-              </div>
-              
-              <div class="post-text ${isSolved ? 'unlocked' : ''}" id="text-${p.id}">
-                ${isSolved ? p.plaintext : p.cipherText}
-              </div>
+              <div>
+                <div class="post-header">
+                  <span>By: ${p.encryptedBy || 'Anonymous'}</span>
+                  <span>${p.timestamp}</span>
+                  ${isSolved ? `<span class="solved-badge">Unlocked by ${p.decryptedBy || 'Unknown'}</span>` : ''}
+                </div>
+                
+                <div class="post-text ${isSolved ? 'unlocked' : ''}" id="text-${p.id}">
+                  ${isSolved ? p.plaintext : p.cipherText}
+                </div>
 
-              ${p.hint ? `<div class="post-hint">Hint: ${p.hint}</div>` : ''}
+                ${p.hint ? `<div class="post-hint">Hint: ${p.hint}</div>` : ''}
+              </div>
 
               ${!isSolved ? `
                 <div class="decrypt-row">
-                  <input type="text" placeholder="Your Name" id="solver-${p.id}" style="width: 30%;">
-                  <input type="text" placeholder="Enter passphrase" id="key-${p.id}">
+                  <input type="text" placeholder="Your Name" id="solver-${p.id}">
+                  <input type="text" placeholder="Passphrase" id="key-${p.id}">
                   <button onclick="tryDecrypt('${p.id}', '${p.cipherText}')">Decrypt</button>
                 </div>
               ` : ''}
@@ -157,7 +181,7 @@
           `;
         }).join('');
       } catch (err) {
-        document.getElementById('feed').innerHTML = '<p style="color:#f43f5e">Error loading posts.</p>';
+        document.getElementById('feed').innerHTML = '<p style="color:#f43f5e; grid-column: span 5;">Error loading posts.</p>';
       }
     }
 
@@ -170,11 +194,9 @@
 
       if (!passphrase) return alert('Enter a passphrase to decrypt.');
 
-      // Attempt AES decryption locally
       const decryptedText = await decryptAES(cipherText, passphrase);
 
       if (decryptedText !== null) {
-        // Success: send decrypted text and solver back to Google Sheets
         await fetch(SCRIPT_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
