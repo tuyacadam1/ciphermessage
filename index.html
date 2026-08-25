@@ -7,12 +7,17 @@
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
     body { background: #0f172a; color: #f8fafc; max-width: 1400px; margin: 40px auto; padding: 0 16px; }
-    h1 { text-align: center; color: #38bdf8; }
+    h1 { text-align: center; color: #38bdf8; margin-bottom: 8px; }
     
+    .status-bar { text-align: center; font-size: 0.8rem; color: #64748b; margin-bottom: 24px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .pulse-dot { width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; display: inline-block; animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+
     .card { background: #1e293b; padding: 20px; border-radius: 8px; margin: 0 auto 32px; border: 1px solid #334155; max-width: 600px; }
     textarea, input[type="text"] { width: 100%; padding: 10px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #fff; }
     button { width: 100%; padding: 10px; background: #0284c7; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
     button:hover { background: #0369a1; }
+    button:disabled { background: #475569; cursor: not-allowed; }
     
     /* --- 5-Column Grid Layout for Public Feed --- */
     #feed {
@@ -48,6 +53,9 @@
 <body>
 
   <h1>Google Sheets Secret Board</h1>
+  <div class="status-bar">
+    <span class="pulse-dot"></span> Auto-sync active (Checking every 4s)
+  </div>
 
   <div class="card">
     <label>Secret Message (Words, Numbers & Symbols)</label>
@@ -62,15 +70,19 @@
     <label>Your Name / Alias</label>
     <input type="text" id="authorInput" placeholder="Who is posting this?">
 
-    <button onclick="submitPost()">Post AES Encrypted Message</button>
+    <button id="postBtn" onclick="submitPost()">Post AES Encrypted Message</button>
   </div>
 
   <h2>Public Feed</h2>
   <div id="feed">Loading messages...</div>
 
   <script>
-    // Paste your Web App Deployment URL here
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx8cA9f8wz-xk4FoNWv4mnZ8AKUul9zpiBSZ3sYwyCgKvJnEGOWmgAPOH2e20Bnzes_/exec";
+    
+    // Auto-refresh configuration
+    const POLL_INTERVAL = 4000; // Poll every 4 seconds
+    let lastPostsHash = "";      // Track state to avoid UI flicker
+    let isRequestPending = false;
 
     // --- AES-GCM Web Crypto Helper Functions ---
     async function getAesKey(passphrase) {
@@ -121,35 +133,71 @@
       const passphrase = document.getElementById('passphraseInput').value.trim();
       const hint = document.getElementById('hintInput').value.trim();
       const encryptedBy = document.getElementById('authorInput').value.trim() || "Anonymous";
+      const btn = document.getElementById('postBtn');
 
       if (!msg || !passphrase) return alert('Enter both a message and an encryption passphrase.');
 
-      const cipherText = await encryptAES(msg, passphrase);
+      btn.disabled = true;
+      btn.innerText = 'Encrypting & Posting...';
 
-      await fetch(SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          cipherText: cipherText,
-          hint: hint,
-          encryptedBy: encryptedBy
-        })
-      });
+      try {
+        const cipherText = await encryptAES(msg, passphrase);
 
-      document.getElementById('messageInput').value = '';
-      document.getElementById('passphraseInput').value = '';
-      document.getElementById('hintInput').value = '';
-      loadPosts();
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            cipherText: cipherText,
+            hint: hint,
+            encryptedBy: encryptedBy
+          })
+        });
+
+        document.getElementById('messageInput').value = '';
+        document.getElementById('passphraseInput').value = '';
+        document.getElementById('hintInput').value = '';
+        
+        // Immediate fetch after posting
+        await loadPosts(true);
+      } catch (err) {
+        alert('Failed to post message. Please try again.');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Post AES Encrypted Message';
+      }
     }
 
-    async function loadPosts() {
+    async function loadPosts(forceRender = false) {
+      // Prevent overlapping requests during slow network conditions
+      if (isRequestPending && !forceRender) return;
+      isRequestPending = true;
+
       try {
-        const res = await fetch(SCRIPT_URL);
+        // Cache-busting parameter prevents browsers from returning cached response
+        const res = await fetch(`${SCRIPT_URL}?t=${Date.now()}`);
         const posts = await res.json();
+        
+        // Create a lightweight signature of the data to see if anything changed
+        const currentHash = JSON.stringify(posts);
+        
+        // If data hasn't changed, retain active DOM state (inputs, focus, scroll)
+        if (currentHash === lastPostsHash && !forceRender) {
+          isRequestPending = false;
+          return;
+        }
+
+        // Save active input values so background polling doesn't erase typing
+        const activeInputs = {};
+        document.querySelectorAll('.decrypt-row input').forEach(input => {
+          if (input.value) activeInputs[input.id] = input.value;
+        });
+
+        lastPostsHash = currentHash;
         const feed = document.getElementById('feed');
 
         if (posts.length === 0) {
           feed.innerHTML = '<p style="color:#94a3b8; grid-column: span 5;">No messages yet.</p>';
+          isRequestPending = false;
           return;
         }
 
@@ -159,76 +207,112 @@
             <div class="post">
               <div>
                 <div class="post-header">
-                  <span>By: ${p.encryptedBy || 'Anonymous'}</span>
-                  <span>${p.timestamp}</span>
-                  ${isSolved ? `<span class="solved-badge">Unlocked by ${p.decryptedBy || 'Unknown'}</span>` : ''}
+                  <span>By: ${escapeHtml(p.encryptedBy || 'Anonymous')}</span>
+                  <span>${escapeHtml(p.timestamp || '')}</span>
+                  ${isSolved ? `<span class="solved-badge">Unlocked by ${escapeHtml(p.decryptedBy || 'Unknown')}</span>` : ''}
                 </div>
                 
                 <div class="post-text ${isSolved ? 'unlocked' : ''}" id="text-${p.id}">
-                  ${isSolved ? p.plaintext : p.cipherText}
+                  ${escapeHtml(isSolved ? p.plaintext : p.cipherText)}
                 </div>
 
-                ${p.hint ? `<div class="post-hint">Hint: ${p.hint}</div>` : ''}
+                ${p.hint ? `<div class="post-hint">Hint: ${escapeHtml(p.hint)}</div>` : ''}
               </div>
 
               ${!isSolved ? `
                 <div class="decrypt-row">
                   <input type="text" placeholder="Your Name" id="solver-${p.id}">
                   <input type="text" placeholder="Passphrase" id="key-${p.id}">
-                  <button onclick="tryDecrypt('${p.id}', '${p.cipherText}')">Decrypt</button>
+                  <button id="btn-${p.id}" onclick="tryDecrypt('${p.id}', '${escapeJsQuotes(p.cipherText)}')">Decrypt</button>
                 </div>
               ` : ''}
             </div>
           `;
         }).join('');
+
+        // Restore active user input states after DOM rewrite
+        Object.keys(activeInputs).forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = activeInputs[id];
+        });
+
       } catch (err) {
-        document.getElementById('feed').innerHTML = '<p style="color:#f43f5e; grid-column: span 5;">Error loading posts.</p>';
+        if (lastPostsHash === "") {
+          document.getElementById('feed').innerHTML = '<p style="color:#f43f5e; grid-column: span 5;">Error loading posts.</p>';
+        }
+      } finally {
+        isRequestPending = false;
       }
     }
 
     async function tryDecrypt(id, cipherText) {
       const keyInput = document.getElementById(`key-${id}`);
       const solverInput = document.getElementById(`solver-${id}`);
+      const btn = document.getElementById(`btn-${id}`);
       
       const passphrase = keyInput.value.trim();
       const decryptedBy = solverInput.value.trim() || "Anonymous";
 
       if (!passphrase) return alert('Enter a passphrase to decrypt.');
 
+      btn.disabled = true;
+      btn.innerText = 'Verifying...';
+
       // Step 1: Attempt local AES decryption
       const decryptedText = await decryptAES(cipherText, passphrase);
 
       if (decryptedText !== null) {
         // Step 2: Key was correct! Send result to Google Sheets
-        const res = await fetch(SCRIPT_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'decrypt',
-            id: id,
-            plaintext: decryptedText,
-            decryptedBy: decryptedBy
-          })
-        });
+        try {
+          const res = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'decrypt',
+              id: id,
+              plaintext: decryptedText,
+              decryptedBy: decryptedBy
+            })
+          });
 
-        const responseData = await res.json();
+          const responseData = await res.json();
 
-        // Step 3: Handle server validation result
-        if (responseData.status === "already_solved") {
-          alert(`Your passphrase was correct, but ${responseData.solvedBy} solved this card right before you!`);
-        } else if (responseData.status === "success") {
-          alert('Congratulations! You were the first to decrypt this message.');
-        } else {
-          alert('An error occurred. Please try again.');
+          // Step 3: Handle server validation result
+          if (responseData.status === "already_solved") {
+            alert(`Your passphrase was correct, but ${responseData.solvedBy} solved this card right before you!`);
+          } else if (responseData.status === "success") {
+            alert('Congratulations! You were the first to decrypt this message.');
+          } else {
+            alert('An error occurred. Please try again.');
+          }
+          
+          await loadPosts(true);
+        } catch(e) {
+          alert('Network error while saving solution.');
+          btn.disabled = false;
+          btn.innerText = 'Decrypt';
         }
-
-        loadPosts();
       } else {
         alert('Incorrect passphrase. Access denied.');
+        btn.disabled = false;
+        btn.innerText = 'Decrypt';
       }
     }
 
+    // Helper functions for safe rendering
+    function escapeHtml(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    
+    function escapeJsQuotes(str) {
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    // Initial Load
     loadPosts();
+
+    // Start background auto-refresh timer
+    setInterval(() => loadPosts(), POLL_INTERVAL);
   </script>
 </body>
 </html>
